@@ -16,6 +16,8 @@ class hierarchical_mutex {
   static thread_local unsigned long this_thread_hierarchy_value;
   void check_for_hierarchy_violation() {
     if (this_thread_hierarchy_value <= hierarchy_value) {
+      std::cout<<"this_thread_hierarchy_value "<<this_thread_hierarchy_value<<std::endl;
+      std::cout<<"hierarchy_value "<<hierarchy_value<<std::endl;
       throw std::logic_error("Mutex hierarchy violated");
     }
   }
@@ -49,19 +51,20 @@ thread_local unsigned long hierarchical_mutex::this_thread_hierarchy_value(std::
 class doubly_ll {
   struct Node {
     hierarchical_mutex m;
+    unsigned long mutex_order;
     std::string data;
     std::unique_ptr<Node> next;
     Node* previous;
-    Node()
-      : m(10), next(nullptr), previous(nullptr)
+    Node(unsigned long m_order)
+      : m(m_order), mutex_order(m_order), next(nullptr), previous(nullptr)
     {}
     Node(unsigned long m_order, std::string const& value)
-      : m(m_order), data(value), next(nullptr), previous(nullptr)
+      : m(m_order), mutex_order(m_order), data(value), next(nullptr), previous(nullptr)
     {}
   };
   // variable declaration in class. Valid in C++11
-  std::unique_ptr<Node> head{new Node};
-  Node* tail{new Node};
+  std::unique_ptr<Node> head{new Node(10000)};
+  Node* tail{new Node(5000)};
 
   std::string random_string( size_t length, std::function<char(void)> rand_char ) {
     std::string str(length, 0);
@@ -82,20 +85,33 @@ public:
   void push (std::string const value, unsigned long m_order) {
     // std::cout<<"in push function\n";
     std::unique_ptr<Node> new_node(new Node(m_order, value));
-    // std::cout<<"initiated new_node\n";
-    std::lock_guard<hierarchical_mutex> l(head->m);
-    std::cout<<"acquired lock on mutex\n";
+    std::cout<<"initiated new_node\n";
+    std::cout<<"attempting to lock head\n";
+    std::unique_lock<hierarchical_mutex> head_l(head->m);
+    std::cout<<"acquired lock on head mutex\n";
     if(head->data.empty()) {
       // std::unique_ptr is non-assignable and non-copyable
       // std::cout<<"in !head conditional\n";
       head = std::move(new_node);
+      std::unique_lock<hierarchical_mutex> tail_l(tail->m);
+      std::cout<<"acquired lock on tail mutex\n";
       tail = head.get();
       // std::cout<<"head points to "<<head.get()<<std::endl;
       // std::cout<<"tail points to "<<tail<<std::endl;
     }
+    else if(head.get() == tail) {
+      // having a lock on head is the same as having a lock on tail. No need to lock tail
+      std::cout<<"in else if clause"<<std::endl;
+      tail->next = std::move(new_node);
+      tail->next->previous = tail;
+      tail = tail->next.get();
+    }
     else {
       std::cout<<"in else block\n";
+      std::unique_lock<hierarchical_mutex> tail_l(tail->m);
+      std::cout<<"acquired lock on tail\n";
       tail->next = std::move(new_node);
+      std::unique_lock<hierarchical_mutex> next_l(tail->next->m);
       // std::cout<<"tail->next points to "<<tail->next.get()<<std::endl;
       // std::cout<<"head->next points to "<<head->next.get()<<std::endl;
       tail->next->previous = tail;
@@ -103,16 +119,6 @@ public:
       // std::cout<<"tail->next points to "<<tail->next.get()<<std::endl;
       // std::cout<<"head->next points to "<<head->next.get()<<std::endl;
     }
-
-    // new_node->previous = &head;
-    // if(head.next==nullptr) {
-    //   new_node->next = nullptr;
-    // }
-    // else {
-    //   new_node->next = std::move(head.next);
-    //   head.next->previous = new_node.get();
-    // }
-    // head.next = std::move(new_node);
   }
 
   void display() {
@@ -121,6 +127,10 @@ public:
       std::cout<<"Node is "<<current->data<<"\n";
       current = current->next.get();
     }
+    std::cout<<"head is "<<head->data<<std::endl;
+    std::cout<<"head mutex order is "<<head->mutex_order<<std::endl;
+    std::cout<<"tail is "<<tail->data<<std::endl;
+    std::cout<<"tail mutex order is "<<tail->mutex_order<<std::endl;
   }
 
   void populate(size_t size, size_t a, size_t b) {
@@ -142,14 +152,31 @@ public:
     for(unsigned int i=0; i < size; i++) {
       auto length = dist_s_length(rng_s_length);
       const std::string r_string = random_string(length, randchar);
-      push(r_string, (unsigned long) 500+i);
+      push(r_string, (unsigned long) 10000-i);
     }
+  }
+
+  void cat() {
+    Node* current = head.get();
+    std::unique_lock<hierarchical_mutex> current_l(head->m);
+    std::string cat = head->data;
+    while(Node* const next = current->next.get()) {
+      std::unique_lock<hierarchical_mutex> next_l(next->m);
+      current_l.unlock();
+      cat += next->data;
+      current = next;
+      current_l = std::move(next_l);
+    }
+    std::cout<<"Concatenated string is "<<cat<<std::endl;
   }
 };
 
 int main() {
   doubly_ll list;
+  //list.push("test1", 500);
   list.populate(100, 2, 8);
+  //list.push("test2", 2000);
   list.display();
+  list.cat();
   return 1;
 }
