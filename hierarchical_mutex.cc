@@ -1,4 +1,7 @@
 #include "hierarchical_mutex.h"
+#include <limits>
+
+thread_local unsigned long hierarchical_mutex::this_thread_hierarchy_value(std::numeric_limits<unsigned long>::max());
 
 void hierarchical_mutex::check_for_hierarchy_violation() {
   if (this_thread_hierarchy_value <= hierarchy_value) {

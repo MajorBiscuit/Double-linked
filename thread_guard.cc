@@ -1,6 +1,5 @@
 #include <iostream>
 #include <thread>
-
 // Declare a function object
 
 struct func {
