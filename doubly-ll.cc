@@ -8,6 +8,7 @@
 #include <functional> // for std::function
 #include <algorithm>  // for std::generate_n
 #include <limits>     // for numeric_limits
+#include <chrono>     // for std::chrono::milliseconds
 
 class hierarchical_mutex {
   std::mutex internal_mutex;
@@ -67,6 +68,7 @@ class doubly_ll {
   std::shared_ptr<Node> head{new Node(150000)};
   std::shared_ptr<Node> tail{new Node(5000)};
   size_t size;
+
   std::string random_string( size_t length, std::function<char(void)> rand_char ) {
     std::string str(length, 0);
     std::generate_n(str.begin(), length, rand_char);
@@ -87,26 +89,26 @@ public:
   void push (std::string const value, unsigned long m_order) {
     // std::cout<<"in push function\n";
     std::unique_ptr<Node> new_node(new Node(m_order, value));
-    std::cout<<"initiated new_node\n";
-    std::cout<<"attempting to lock head\n";
+    // std::cout<<"initiated new_node\n";
+    // std::cout<<"attempting to lock head\n";
     std::unique_lock<hierarchical_mutex> head_l(head->m);
-    std::cout<<"acquired lock on head mutex\n";
+    // std::cout<<"acquired lock on head mutex\n";
     if(!head->next) {
       // std::unique_ptr is non-assignable and non-copyable
-      std::cout<<"in !head clause\n";
+      // std::cout<<"in !head clause\n";
       std::unique_lock<hierarchical_mutex> tail_l(tail->m);
-      std::cout<<"acquired lock on tail mutex\n";
+      // std::cout<<"acquired lock on tail mutex\n";
       new_node->next = tail;
       new_node->previous = head;
       tail->previous = std::move(new_node);
       head->next = tail->previous;
-      std::cout<<"head points to "<<head.get()<<std::endl;
-      std::cout<<"tail points to "<<tail<<std::endl;
+      // std::cout<<"head points to "<<head.get()<<std::endl;
+      // std::cout<<"tail points to "<<tail<<std::endl;
     }
     else {
-      std::cout<<"in else block\n";
+      // std::cout<<"in else block\n";
       std::unique_lock<hierarchical_mutex> next_l(head->next->m);
-      std::cout<<"acquired lock on next\n";
+      // std::cout<<"acquired lock on next\n";
       new_node->next = head->next;
       new_node->previous = head;
       head->next = std::move(new_node);
@@ -122,11 +124,11 @@ public:
     Node* current = head->next.get();
     unsigned int count{0};
     while(current && (current != tail.get())) {
-      std::cout<<"Node "<<count<<" is "<<current->data<<"\n";
+      std::cout<<"\nNode "<<count<<" is "<<current->data<<"\n";
       current = current->next.get();
       count++;
     }
-    std::cout<<"count is "<<count<<std::endl;
+    std::cout<<"\n count is "<<count<<std::endl;
     // std::cout<<"head is "<<head->data<<std::endl;
     // std::cout<<"next of head is "<<head->next->data<<std::endl;
     // std::cout<<"head mutex order is "<<head->mutex_order<<std::endl;
@@ -170,7 +172,13 @@ public:
       // not strictly necessary since tail has an empty string
       if (current->next.get() == tail.get()) break;
     }
-    std::cout<<"Concatenated string is "<<cat<<std::endl;
+    std::cout<<"\nConcatenated string is "<<cat<<std::endl;
+  }
+
+  void c_cat() {
+    while(size > 0) {
+      cat();
+    }
   }
 
   size_t length() {
@@ -197,7 +205,7 @@ public:
     std::shared_ptr<Node> current = head;
     unsigned int count{1};
     std::unique_lock<hierarchical_mutex> current_l(current->m);
-    std::cout<<"acquired lock on head\n";
+    // std::cout<<"acquired lock on head\n";
     while(current->next && (current->next != tail)) {
       std::unique_lock<hierarchical_mutex> next_l(current->next->m);
       if(count == index) {
@@ -217,26 +225,43 @@ public:
       count++;
     }
   }
+
+  void c_remove() {
+    // non-deterministic random number generator
+    std::default_random_engine rng(std::random_device{}());
+    while(size > 0) {
+      std::uniform_int_distribution<> dist_n(1, size);
+      unsigned int index = dist_n(rng);
+      std::this_thread::sleep_for(std::chrono::microseconds(10));
+      remove(index);
+    }
+  }
 };
 
 int main() {
   doubly_ll list;
   //list.push("test1", 500);
-  list.populate(5, 2, 8);
+  list.populate(100, 2, 8);
   //list.push("test2", 2000);
   list.display();
-  list.remove(5);
-  list.display();
-  list.remove(3);
-  list.display();
-  list.remove(3);
-  list.display();
-  list.remove(1);
-  list.remove(1);
-  list.display();
+  std::thread cat_t(&doubly_ll::c_cat, std::ref(list));
+  std::thread remove_t(&doubly_ll::c_remove, std::ref(list));
+  // list.remove(5);
+  // list.display();
+  // list.remove(3);
+  // list.display();
+  // list.remove(3);
+  // list.display();
+  // list.remove(1);
+  // list.remove(1);
+  // list.display();
+  // list.remove(1);
   //list.remove(5);
   //list.display();
   int length = list.length();
   std::cout<<"length of list is "<<length<<std::endl;
+  cat_t.join();
+  remove_t.join();
+  list.display();
   return 1;
 }
